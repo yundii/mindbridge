@@ -1,0 +1,14 @@
+from pathlib import Path
+root=Path(__file__).resolve().parent.parent
+source=root/'src/main/resources/static'
+out=root/'demo'
+html=(source/'index.html').read_text().replace('href="/styles.css"','href="styles.css"').replace('src="/app.js"','src="app.js"').replace('<script defer src="app.js">','<script defer src="workbook.js"></script><script defer src="demo-api.js"></script><script defer src="app.js">').replace('href="/"','href="index.html"')
+html=html.replace('<body class="loading-profile">','''<body class="loading-profile"><div class="demo-banner"><strong>Browser simulation</strong><span>Template responses · synthetic data only · no backend, AI model, or real notifications</span><a href="index.html">Switch role</a><button id="reset-demo" type="button">Reset demo</button></div>''').replace('Sign out','Switch role').replace('Local workspace','Browser-only demo').replace('Local demo workspace','Browser demo workspace').replace('Download Excel ledger ↗','Export simulated ledger ↗').replace('Ledger → local notification record. No external delivery.','Simulated ledger → simulated notification. No external delivery.').replace('<div id="reports-list">','<button id="fail-next" class="subtle-button">Simulate next ledger failure</button><p id="failure-note"></p><div id="reports-list">')
+(out/'workspace.html').write_text(html)
+css=(source/'styles.css').read_text();css='\n'.join(line for line in css.splitlines() if not line.startswith('@import'))
+css+='''\n.demo-banner{position:sticky;top:0;z-index:100;background:#e8efcd;border-bottom:1px solid #a9ba83;padding:12px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px;min-height:70px}.demo-banner span{flex:1}.demo-banner a,.demo-banner button{font:inherit;color:#365238}.demo-banner button{border:1px solid #a9ba83;border-radius:5px;background:transparent;padding:6px}.sidebar{top:70px}.login-card a{color:#49693a;text-decoration:underline}.login-card hr{border:0;border-top:1px solid #dce3cc;margin-top:24px}#failure-note{font-size:12px;color:#76573a}@media(max-width:650px){.demo-banner{position:static;gap:8px;padding:12px 18px}.demo-banner span{flex-basis:100%}.sidebar{top:auto}}\n'''
+(out/'styles.css').write_text(css)
+js=(source/'app.js').read_text().replace('fetch(', 'window.demoFetch(').replace('localStorage','sessionStorage').replace("'/login.html'","'index.html'").replace("' · configured'","' · no model'")
+js+='''\ndocument.querySelector('#reset-demo').addEventListener('click',()=>{if(busy)return notice('Wait for the current reply to finish.');window.demoReset();location.assign('index.html');});
+document.querySelector('#fail-next').addEventListener('click',()=>{window.demoFailNext();document.querySelector('#failure-note').textContent='The next simulated safety ledger step will fail. Generate a safety example, then use Retry tools.';});\n'''
+(out/'app.js').write_text(js)

@@ -13,3 +13,11 @@ jobs:
           java-version: '17'
           cache: maven
       - run: mvn --batch-mode verify
+  browser-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test demo/demo.test.cjs

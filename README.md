@@ -168,3 +168,17 @@ Still deferred from the target business-flow diagram:
 Keyword screening can miss or misread risk, including negated or historical statements. Knowledge cards are illustrative, not a reviewed clinical corpus. Database files, reports, and the Excel ledger are plaintext. Keep the prototype local and use synthetic data. No clinical accuracy, throughput improvement, relevance improvement, or delivery-rate percentage is claimed.
 
 Implementation references: [Spring Security CSRF](https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html), [Spring AI chat models](https://docs.spring.io/spring-ai/reference/api/chatmodel.html), [Apache POI workbook API](https://poi.apache.org/apidocs/dev/org/apache/poi/ss/usermodel/Workbook.html). Versions are pinned in `pom.xml`.
+
+## Public browser simulation
+
+[Open the interactive browser demo](https://yundiitao.netlify.app/demos/mindbridge/) · [Project overview](https://yundiitao.netlify.app/projects/mindbridge.html)
+
+The `demo/` directory is a separately labeled static walkthrough for the portfolio. It reuses the UI with an explicit browser-only adapter: template responses, simple keyword reference matching (not the Java BM25 implementation), simulated role views, reports, ordered tool events, a failure/retry scenario, and a real XLSX export of synthetic rows. Data stays in `sessionStorage`; roles are a UI simulation, **not authentication or a security boundary**. It has no model/network API calls and sends no notifications.
+
+```bash
+python3 scripts/build-browser-demo.py
+node --test demo/demo.test.cjs
+python3 -m http.server 8092 --directory demo
+```
+
+Choose a role in `index.html`. Switch from student to admin to inspect reports; **Simulate next ledger failure** lets you exercise the retry path. **Reset demo** clears the current tab's sample data. Deploy only the static demo assets; never include `data/`, `.env`, or the local health-data database. The Spring Boot application remains the full backend implementation.
