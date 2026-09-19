@@ -1,134 +1,170 @@
-# MindBridge
+# MindBridge · V2
 
-A runnable student wellbeing MVP built with **Java 17, Spring Boot, Spring AI, Reactor, and SQL**. An English web interface connects daily check-ins, transparent screening, local knowledge retrieval, streamed replies, and a local support desk.
+A runnable student wellbeing prototype: **Java 17, Spring Boot, Spring Security, Spring AI, Reactor SSE, JDBC, H2 / MySQL, and Apache POI**. The English UI separates a student's conversations from an administrator's knowledge library, screening reports, Excel ledger, and safety alerts.
 
-**No API key is needed for the default demo.** Demo responses are templates, visibly labeled in the interface. This is a portfolio prototype, not a medical device, therapist, or emergency service. Use synthetic conversations only.
+Default **demo mode needs no API key**. Responses and screening are illustrative, not clinically validated. Use synthetic data. Local notification records do not contact counselors or emergency services.
 
-## Run locally
+## Start
 
 Requirements: Java 17+ and Maven 3.9+.
 
 ```bash
+./scripts/run-dev.sh
+# equivalent:
 mvn spring-boot:run
 ```
 
-Open <http://localhost:8087>. The app binds to `127.0.0.1`. H2 stores data in `./data/`; it survives restarts and is excluded from Git. Start commands from this repository root.
+Open <http://localhost:8087>. The server binds to `127.0.0.1`.
+
+| Local account | Default password | Role |
+|---|---|---|
+| `student` | `student-demo` | Student |
+| `student2` | `student2-demo` | Second student, for isolation checks |
+| `admin` | `admin-demo` | Administrator |
+
+Override with `STUDENT_PASSWORD`, `SECOND_STUDENT_PASSWORD`, and `ADMIN_PASSWORD`. Accounts are provisioned in memory at startup; passwords use BCrypt via Spring Security's delegating encoder. This is a three-account demo, not a registration or identity management system. Login uses a server session with CSRF protection; it does not store passwords or bearer tokens in browser storage.
 
 ```bash
 mvn verify
-# Or run the packaged application:
-java -jar target/mindbridge-0.1.0.jar
+java -jar target/mindbridge-0.2.0.jar
 ```
 
-## Try the complete flow
+Run from the repository root. Data is stored under `./data/` and excluded from Git. `.env` is not automatically loaded by Spring Boot; export environment variables explicitly.
 
-1. Select **Exams feel overwhelming**, or send `I am anxious about my exams`.
-2. Watch the reply stream and inspect the support route, response provider, and retrieved references.
-3. Refresh the page to restore the conversation; export its JSON report.
-4. In a synthetic test conversation, send `I want to hurt myself`.
-5. Open **Support desk**, inspect the local alert, and acknowledge it.
-6. Browse **Resource library**, or start a new conversation.
+## Business flow implemented
 
-High-risk rule matches bypass the model and use a fixed safety response. A local alert is committed together with the user message **before** any reply starts. No email, SMS, real counselor, or emergency responder is contacted. Acknowledgment changes a record; it does not confirm that anyone is safe.
+```text
+Sign in → student / admin role
+
+Student message
+  → owner check + per-session concurrency guard
+  → MemoryAgent: latest 12 SQL messages
+  → SupervisorAgent: CHAT / CONSULT / RISK
+      CHAT → CompanionAgent → AIClient → SSE
+      CONSULT / RISK
+           → KnowledgeAgent: query expansion + BM25
+           → RiskGuardianAgent: conservative screening
+           → CounselorAgent → AIClient → SSE
+  → commit input + screening report (CONSULT/RISK only)
+    + safety alert and WAITING_RESPONSE job (RISK only)
+  → generate reply; save completed assistant response
+  → release high-risk tool job after response completes/errors/disconnects
+
+Persistent worker
+  → Excel snapshot succeeds
+  → local notification record
+  → completion / failure checkpoints + tool-event audit
+```
+
+The runtime has a hard cap of **8 stages**; current routes execute 3 or 5. Stages run deterministically within `AgentRuntimeService`, not as autonomous multi-process agents. AIClient receives the selected support role, recent history, and references. `CHAT` skips retrieval and creates no screening report. Current risk rules and explicit help/advice terms select `CONSULT`; safety language or an unresolved safety alert selects `RISK`. A high-risk response bypasses the LLM and uses a fixed safety template. Retrieved text cannot downgrade that safety decision.
+
+Screening reports are nonclinical summaries containing a quoted student statement, rule label, rationale, and response status. They are committed before generation to survive model failure. The UI hides internal screening labels from students; student APIs expose their own transcript, not admin reports.
+
+## Try all three paths
+
+1. Sign in as `student`.
+2. Send `Hello, I had a good day`. This takes `CHAT`; it creates no screening report.
+3. Send `I am anxious about exams`. This takes `CONSULT`, retrieves references, and creates an admin screening report.
+4. In a synthetic test, send `I want to hurt myself`. This takes `RISK`, saves a local alert immediately, and queues Excel → local notification after the reply.
+5. Sign out and sign in as `admin`. The support desk shows reports, response status, tool checkpoints, retry counts, audit history, and alerts. Click **Refresh** after a few seconds to see worker progress. Download the actual `.xlsx` ledger and acknowledge the alert.
+6. Open **Resource library** as admin to add, edit, or delete custom text cards; built-in demo cards are read-only. Custom cards persist and participate in retrieval immediately.
+7. Sign in as `student2`. The other student's sessions are absent; requesting their transcript or posting to their session returns 404. Student access to admin APIs returns 403.
+
+An open safety alert keeps subsequent messages in the same conversation on the safety route until an administrator acknowledges the record. Acknowledgment is an administrative action, not confirmation that a person is safe. Starting another conversation is not a clinical reset; this prototype does not perform cross-conversation clinical risk assessment.
+
+## Tool ordering and retries
+
+- Reports, jobs, local notification records, and tool events live in SQL.
+- Jobs wait for the response to end. A 90-second overall generation deadline complements the real provider's 45-second inactivity timeout. Failed or canceled streams do not save partial assistant replies.
+- On restart, interrupted jobs become retryable and pending response statuses become incomplete. A worker also recovers high-risk jobs stuck waiting for more than two minutes.
+- Polling defaults to every two seconds. Failed jobs retry with backoff, up to three attempts per cycle; admins can retry `FAILED` or `RETRY` jobs. Completed jobs cannot be retried through the API.
+- Excel is rebuilt from stored high-risk reports, using stable report IDs and atomic file replacement. Retrying rebuilds the same snapshot rather than appending duplicate rows. Student statements are written as string cells, never Excel formulas.
+- Notification processing only runs after a successful Excel write. The local notification table has a unique report ID, so a retry after a checkpoint failure does not add a second record.
+- The final notification status is **`LOCAL_RECORDED`**, not `DELIVERED`. There is no SMTP, external HTTP, or MCP notification adapter in this version.
+- This worker is designed for **one application instance**, not clustered deployment. Its startup recovery assumes the previous instance has stopped.
+
+`EXCEL_PATH` defaults to `./data/mindbridge-reports.xlsx`. An unwritable path blocks the notification step and exposes the failure to admins. After correcting the path/permissions, use **Retry tools**. Error records intentionally omit raw student text and provider error bodies.
 
 ## Model providers
 
-One configured provider per application process. This MVP does not implement automatic cost/latency routing or cloud fallback.
+One configured provider per process; no automatic cloud fallback or per-agent cost routing.
 
 ### Ollama
 
-Install Ollama separately and run its service, then:
+Install and start Ollama separately:
 
 ```bash
 ollama pull llama3.2
-AI_PROVIDER=ollama OLLAMA_MODEL=llama3.2 mvn spring-boot:run
+AI_PROVIDER=ollama OLLAMA_MODEL=llama3.2 ./scripts/run-dev.sh
 ```
 
-`OLLAMA_BASE_URL` defaults to `http://localhost:11434`. Calls use Spring AI's `OllamaChatModel`. Model streams time out after 45 seconds of inactivity.
+`OLLAMA_BASE_URL` defaults to `http://localhost:11434`. Uses Spring AI `OllamaChatModel`.
 
 ### OpenAI
 
 ```bash
 export OPENAI_API_KEY='your-key'
-AI_PROVIDER=openai OPENAI_MODEL=gpt-4o-mini mvn spring-boot:run
+AI_PROVIDER=openai OPENAI_MODEL=gpt-4o-mini ./scripts/run-dev.sh
 ```
 
-Calls use Spring AI's `OpenAiChatModel`. This mode sends the current message, up to 12 prior messages, and retrieved reference cards to OpenAI and may incur API charges. Nothing is sent to a model provider in demo mode. Keys are read from environment variables, never from the browser. `.env` files are not automatically loaded by Spring Boot.
+Uses Spring AI `OpenAiChatModel`. This sends the current message, up to 12 prior messages, and retrieved cards to OpenAI and may incur API charges. Demo mode sends no model requests. Keys remain server-side. The UI uses optional Google Fonts and falls back to system fonts offline.
 
 ## Optional MySQL
 
-Default H2 needs no Docker. To run the supplied MySQL service, install Docker and create a local `.env` from `.env.example`, replacing both database passwords. Then:
+Default H2 requires no Docker. For MySQL, install Docker, copy `.env.example` to `.env`, replace the database passwords, and run:
 
 ```bash
 docker compose up -d
 export DB_URL='jdbc:mysql://localhost:3307/mindbridge?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC'
 export DB_USER=mindbridge
 export DB_PASSWORD='the-password-from-your-env-file'
-mvn spring-boot:run
+./scripts/run-dev.sh
 ```
 
-Wait until MySQL is ready before starting the app. The same SQL schema is initialized on startup. Compose loads `.env` for container configuration; export the app's database values separately. MySQL is mapped to loopback only. MySQL support is configured but was not runtime-tested in the initial development environment, where Docker was unavailable.
+Wait for MySQL to become ready. Compose reads `.env`; Spring Boot needs exported variables. The container maps to loopback port 3307. MySQL configuration is included but has not been runtime-tested in the local development environment, which has no Docker.
 
-## Architecture
+## Upgrade from V1
 
-```text
-English browser UI
-  │ POST message → SSE meta / token / done / error
-  ▼
-ChatController (orchestration + per-session concurrency guard)
-  ├── RiskAgent       → keyword screening + specialized response route
-  ├── KnowledgeAgent  → query expansion + BM25 over four demo cards
-  ├── ConversationStore → transaction: user message + optional local alert
-  └── AIClient        → demo / Spring AI Ollama / Spring AI OpenAI
-                        └── high-risk match → fixed safety template
-  │
-  └── completed response → boundedElastic SQL save → done event
-```
+V2 uses additive tables in `schema.sql`; existing conversations/messages/alerts are preserved. **Legacy anonymous conversations have no owner and are not assigned to either student.** Admins can still see legacy alerts. New conversations receive an explicit owner. Browser session IDs are stored per username. No legacy data is pushed to GitHub.
 
-`RiskAgent`, `KnowledgeAgent`, and `AIClient` are deterministic modules under one orchestrator. `CompanionAgent`, `CopingAgent`, `SupportAgent`, and `SafetyAgent` identify response routes; they are not independently autonomous LLM workers. Completed assistant replies are saved off the streaming scheduler, and `done` is emitted only after that save succeeds. User/alert persistence is synchronous and transactional. On model failure or disconnect, incomplete assistant text is not saved; the accepted user message and local alert remain. Reports are computed on request, not in a durable background job queue.
+This is an additive prototype schema, not a production migration system. Use a versioned migration tool and tested backups before operating on real data.
 
-## What is implemented vs. planned
+## API and access
 
-| Area | This MVP | Follow-up |
+| Method | Route | Access / purpose |
 |---|---|---|
-| Orchestration | Screening, retrieval, specialized prompts / response templates | Independently evaluated specialist agents |
-| Risk screening | Four transparent bilingual keyword categories | LoRA classifier + dataset governance + clinical validation |
-| RAG | Rule-based query expansion + local BM25; references injected into real model prompts | ChromaDB embeddings, hybrid fusion, reranking |
-| AIClient | Configurable demo / Ollama / OpenAI adapter | Per-agent routing, budget policy, telemetry |
-| Streaming | SSE + Reactor; real providers emit model chunks, demo emits timed characters | Load testing and backpressure measurements |
-| Persistence | H2 default, optional MySQL | Migrations, retention, encrypted storage |
-| Reports | Downloadable session JSON with screening counts | Durable asynchronous report jobs |
-| Escalation | Persistent local alerts + acknowledgment | Authenticated counselor workflow, MCP tool adapters, verified delivery |
+| GET | `/api/csrf` | Public; obtains a session CSRF token |
+| POST | `/login`, `/logout` | Form login / session logout, CSRF required |
+| GET | `/api/profile`, `/api/status` | Authenticated; role and scoped counts |
+| GET / POST | `/api/conversations` | Student; list own / create owned session |
+| GET | `/api/conversations/{id}/messages` | Student owner; transcript |
+| POST | `/api/conversations/{id}/messages` | Student owner; SSE reply |
+| GET | `/api/conversations/{id}/report` | Student owner; downloadable transcript (legacy route name) |
+| GET | `/api/knowledge` | Authenticated; reference cards |
+| POST | `/api/admin/knowledge` | Admin; create custom card |
+| PUT / DELETE | `/api/admin/knowledge/{id}` | Admin; edit / delete custom card |
+| GET | `/api/admin/reports`, `/api/admin/reports/{id}` | Admin; screening reports / tool audit |
+| POST | `/api/admin/reports/{id}/retry` | Admin; retry failed tool job |
+| GET | `/api/admin/excel` | Admin; generated XLSX ledger |
+| GET | `/api/alerts` | Admin; local safety alerts |
+| POST | `/api/alerts/{id}/acknowledge` | Admin; acknowledge record |
 
-There is **no LoRA training, ChromaDB, embedding search, neural reranker, or MCP implementation yet**. The résumé's **28%, 25%, 40%, and 98%** metrics are not claimed or reproduced. Establish datasets, baselines, and repeatable evaluations before using these figures for this repository.
+All state-changing requests require the CSRF header returned by `/api/csrf`. Fetch a fresh token after login. SSE uses `meta` (intent, references, provider), `token` (`text`), `done` (`persisted: true`), and `error` events. `done` follows completed-response persistence. The HTTP API rejects missing authentication (401), forbidden roles / missing CSRF (403), unknown or unowned sessions (404), and concurrent messages in one session (409).
 
-## API
+## Verification and boundaries
 
-| Method | Route | Purpose |
-|---|---|---|
-| GET | `/api/status` | Configured provider and aggregate counts |
-| POST | `/api/conversations` | Create a session |
-| GET | `/api/conversations/{id}/messages` | Restore messages |
-| POST | `/api/conversations/{id}/messages` | Stream reply; JSON `{ "message": "..." }` |
-| GET | `/api/conversations/{id}/report` | Session report |
-| GET | `/api/knowledge` | Demo knowledge cards |
-| GET | `/api/alerts` | Local alerts |
-| POST | `/api/alerts/{id}/acknowledge` | Acknowledge local record |
+Automated tests cover authentication, CSRF, role restrictions, cross-student access, three route traces, report suppression for CHAT, hidden student labels, persistence/SSE, knowledge CRUD, model errors, cancellation, Excel-before-notification ordering, retry exhaustion, restart recovery, local notification deduplication, and XLSX string-cell safety. CI runs `mvn verify`.
 
-SSE emits `meta` (screening, references, provider, local alert ID), repeated `token` objects with `text`, and `done` with `persisted: true`. An `error` event means the reply did not complete. HTTP 400 rejects blank / >4000-character messages; 404 rejects missing resources; 409 rejects concurrent messages in the same conversation.
+Still deferred from the target business-flow diagram:
 
-## Limits and deployment boundary
+- Redis memory cache; SQL is the current memory source.
+- JPA / reactive WebFlux server; this version retains JDBC + Spring MVC with Reactor SSE.
+- PDF/Markdown ingestion, chunking, embeddings, ChromaDB hybrid retrieval, reranking.
+- Fine-tuned Qwen/Llama, LoRA training/merging, GGUF packaging.
+- SMTP/HTTP/MCP tool adapters and verified external delivery.
+- RAGAS / retrieval evaluation datasets, performance benchmarks.
+- Production account management, rate limiting, retention/deletion policies, encrypted health-data storage, and clinical validation.
 
-- Rule matches are deliberately conservative, including negated and historical safety mentions. Unmatched messages can still involve serious risk. Category labels are neither diagnoses nor confidence scores.
-- Demo knowledge cards are original illustrative content, not a reviewed clinical corpus. Retrieval relevance does not establish medical accuracy.
-- No authentication, authorization, or counselor role isolation exists. All sessions and alerts are accessible to local API clients. Do not expose this MVP to a network or enter real student health information.
-- Conversations are stored in plaintext. New conversation creates a new ID; it does not delete old records. Browser storage holds only the current session ID. There is no retention / deletion workflow yet.
-- The UI loads optional Google Fonts; system fonts remain usable offline.
-- Provider adapters are compiled; initial automated tests cover demo mode. Real Ollama/OpenAI behavior requires configured services and credentials.
-- This is a single-process prototype, with no durable task queue, distributed lock, notification delivery, or production performance claims.
+Keyword screening can miss or misread risk, including negated or historical statements. Knowledge cards are illustrative, not a reviewed clinical corpus. Database files, reports, and the Excel ledger are plaintext. Keep the prototype local and use synthetic data. No clinical accuracy, throughput improvement, relevance improvement, or delivery-rate percentage is claimed.
 
-## Verification
-
-`mvn verify` tests all four routes, safety precedence, bilingual rule matching, conservative negation handling, BM25 relevance, input validation, SSE completion, persistence/report generation, and alert creation/acknowledgment. GitHub Actions runs the Java test suite on pushes and pull requests.
-
-Reference APIs: [Spring AI Chat Model](https://docs.spring.io/spring-ai/reference/api/chatmodel.html), [Ollama integration](https://docs.spring.io/spring-ai/reference/api/chat/ollama-chat.html). Dependencies are pinned in `pom.xml`; this prototype is not presented as using the latest releases.
+Implementation references: [Spring Security CSRF](https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html), [Spring AI chat models](https://docs.spring.io/spring-ai/reference/api/chatmodel.html), [Apache POI workbook API](https://poi.apache.org/apidocs/dev/org/apache/poi/ss/usermodel/Workbook.html). Versions are pinned in `pom.xml`.

@@ -175,3 +175,19 @@ h1{font-size:27px;letter-spacing:-1.2px}
 .disclaimer{margin-top:16px}
 footer span:last-child{display:none}
 }
+
+.loading-profile main,.loading-profile .sidebar{visibility:hidden}
+.login-page{min-height:100vh;display:grid;place-items:center;padding:24px}
+.login-card{width:min(460px,100%);background:var(--white);padding:40px;border:1px solid var(--line);border-radius:20px}
+.login-card h1{margin-top:24px}.login-card p{color:#74836e;line-height:1.8}
+.login-card label,#knowledge-form label{display:block;margin:16px 0 7px;font-size:12px}
+input,#knowledge-form textarea{display:block;width:100%;padding:12px;border:1px solid #cdd8c3;border-radius:7px;background:#fafbf6;color:var(--ink);font:14px 'DM Sans',sans-serif;margin-top:7px}
+.primary-button{background:#405e42;color:white;padding:12px 20px;border:0;border-radius:8px;margin-top:18px}
+.login-card .primary-button{width:100%}.login-card details{font-size:11px;line-height:1.9;margin-top:22px;color:#76836d}
+#login-error{color:#964937;font-size:12px}.session-list{max-height:140px;overflow:auto;margin:12px 8px}.session-list button{display:block;border:0;background:transparent;color:#74836e;font-size:10px;padding:8px;width:100%;text-align:left}
+#account-name{font-size:10px;letter-spacing:0}.desk-actions{display:flex;gap:18px;align-items:center;margin:20px 0}.desk-actions span{font-size:11px;color:#738465}
+.section-heading{font:550 18px 'Manrope',sans-serif;margin:25px 0 15px}.report-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:22px;margin-bottom:14px}
+.report-card h3{font-size:13px;margin:0 0 10px}.report-card p{font-size:12px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;color:#64735c}.report-card small{display:block;font-size:10px;color:#79886e;line-height:1.9}.report-card .error{color:#9a563f}.report-card button{margin-top:10px}
+#knowledge-form{margin-bottom:24px}#knowledge-form textarea{min-height:120px}.resource button{margin-right:10px}
+@media(max-width:900px){.session-list{display:none}.header-right{gap:8px}#account-name{font-size:9px}.desk-actions{flex-wrap:wrap}}
+@media(max-width:650px){.login-card{padding:28px}header{flex-wrap:wrap;height:auto;min-height:75px;padding:14px 0;gap:12px}.header-right .demo-pill{display:none}.header-right .subtle-button{padding:6px 8px} .nav-item[hidden]{display:none}}

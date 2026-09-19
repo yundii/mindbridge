@@ -3,6 +3,8 @@ package com.mindbridge;
 import java.util.*;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** Small local BM25 retriever with deterministic query expansion; no vector claims. */
 @Component
@@ -15,7 +17,14 @@ public class KnowledgeAgent {
         new Document("connection", "You do not have to carry it alone", "If you feel lonely or low, consider reaching out to someone you trust and sharing how things have been. Your campus counseling service can also explain the support available to you.", "MindBridge demo knowledge card · not clinical guidance", "孤独 低落 难过 抑郁 没意义 lonely sad hopeless depress"),
         new Document("reflection", "A little space to check in", "Take a moment to describe how you feel and what gave you energy or used it up today. Your reflection does not have to be perfect, and you do not need to label yourself.", "MindBridge demo knowledge card · not clinical guidance", "今天 日常 开心 感受 daily hello happy reflection")
     );
-    public List<Document> all() { return documents; }
+    private JdbcTemplate db;
+    public KnowledgeAgent() {}
+    @Autowired public KnowledgeAgent(JdbcTemplate db) { this.db=db; }
+    public List<Document> all() {
+        var result=new ArrayList<>(documents);
+        if(db!=null) result.addAll(db.query("SELECT * FROM knowledge_cards ORDER BY id",(rs,n)->new Document(rs.getString("id"),rs.getString("title"),rs.getString("content"),rs.getString("source"),rs.getString("tags"))));
+        return result;
+    }
     private static final Set<String> STOP_WORDS = Set.of("i", "a", "an", "the", "to", "of", "and", "or", "in", "on", "for", "it", "is", "am", "are", "was", "be", "been", "have", "has", "my", "me", "you", "your", "that", "this", "with", "about", "lately", "feeling", "feel", "some", "can", "do", "at", "up", "as");
     private List<String> tokens(String input) {
         var out = new ArrayList<String>();
@@ -38,6 +47,7 @@ public class KnowledgeAgent {
         return out;
     }
     public List<Hit> search(String query) {
+        var documents=all();
         String expanded = query.replace("考试", "考试 压力").replace("睡不着", "睡不着 睡眠 失眠").replace("anxious", "anxious anxiety");
         var terms = new HashSet<>(tokens(expanded));
         var corpus = documents.stream().map(d -> tokens(d.title()+" "+d.content()+" "+d.tags())).toList();

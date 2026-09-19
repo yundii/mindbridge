@@ -11,6 +11,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class ApiErrors {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String,String>> validation(MethodArgumentNotValidException error) {
-        return ResponseEntity.badRequest().body(Map.of("error","Message must contain 1–4000 characters and cannot be blank."));
+        return ResponseEntity.badRequest().body(Map.of("error","Invalid input. Check required fields and length limits."));
     }
 }
